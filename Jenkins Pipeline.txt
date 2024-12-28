@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "wordpress-ecommerce"
+        DOCKER_CONTAINER = "ecom-container"
+        DOCKER_PORT = "8080" // Application exposed port
+    }
+
+    stages {
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE} ."
+                }
+            }
+        }
+        
+        stage('Stop Existing Container') {
+            steps {
+                script {
+                    sh '''
+                    docker stop ${DOCKER_CONTAINER} || true
+                    docker rm ${DOCKER_CONTAINER} || true
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                script {
+                    sh "docker run -d --name ${DOCKER_CONTAINER} -p ${DOCKER_PORT}:80 ${DOCKER_IMAGE}"
+                }
+            }
+        }
+
+        stage('Setup Monitoring (Optional)') {
+            when {
+                expression { params.SETUP_MONITORING }
+            }
+            steps {
+                script {
+                    sh '''
+                    docker network create monitoring || true
+
+                    docker run -d --name prometheus --network monitoring \
+                    -p 9090:9090 prom/prometheus
+
+                    docker run -d --name grafana --network monitoring \
+                    -p 3000:3000 grafana/grafana
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment Successful! Access the app at http://localhost:${DOCKER_PORT}'
+            echo 'Grafana: http://localhost:3000 (default: admin/admin)'
+            echo 'Prometheus: http://localhost:9090'
+        }
+        failure {
+            echo 'Deployment Failed. Check logs.'
+        }
+        always {
+            script {
+                echo "Cleaning up unused Docker resources..."
+                sh "docker system prune -f || true"
+            }
+        }
+    }
+}
